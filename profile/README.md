@@ -51,32 +51,26 @@
 ### 🏗️ Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph phone["📱 Your phone · bloom-health-app"]
-    ui["Expo Router screens"]
-    store[("SQLite cache<br/>+ sync queue")]
-    device["Steps from HealthKit / Health Connect<br/>Reminders · Alarms · Widgets"]
-    ui <--> store
-    device --> ui
+    direction LR
+    device["Steps · Reminders<br/>Alarms · Widgets"] --> ui["Expo screens"] <--> store[("SQLite cache<br/>+ sync queue")]
   end
 
-  subgraph cloud["☁️ Backend"]
-    api["bloom-health-service<br/>Go · Gin · Vercel"]
-    db[("MongoDB Atlas")]
-    worker["bloom-health-task-worker<br/>Go · GCP VM"]
-  end
+  api["⚙️ bloom-health-service<br/>Go · Gin · Vercel"]
+  db[("🍃 MongoDB Atlas")]
+  worker["🤖 bloom-health-task-worker<br/>Go · GCP VM"]
 
-  smtp{{"Email · one-time codes"}}
+  smtp{{"Email codes"}}
   google{{"Google Sign-In"}}
-  groq{{"Groq · AI model"}}
+  groq{{"Groq AI model"}}
 
-  store <-->|"HTTPS /v1 · push & pull"| api
-  ui -->|"Bloomy chat"| api
+  phone -->|"HTTPS /v1 · sync & Bloomy chat"| api
   api --> smtp
   api --> google
   api <--> db
-  worker <-->|"claim & settle chat turns"| db
-  worker -->|"Bloomy replies"| groq
+  db <-->|"claim & settle chat turns"| worker
+  worker --> groq
   worker -.->|"daily account clean-up"| api
 ```
 
