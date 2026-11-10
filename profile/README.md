@@ -48,6 +48,78 @@
 | [`bloom-health-service`](https://github.com/BloomHealthApp/bloom-health-service) | REST + sync API, OTP auth, owner/viewer access | Go · Gin · MongoDB Atlas |
 | `bloom-health-task-worker` | Background worker for Bloomy chat and scheduled jobs | Go · MongoDB · GCP |
 
+### 🏗️ Architecture
+
+```mermaid
+flowchart LR
+  subgraph phone["📱 Your phone · bloom-health-app"]
+    ui["Expo Router screens"]
+    store[("SQLite cache<br/>+ sync queue")]
+    device["Steps from HealthKit / Health Connect<br/>Reminders · Alarms · Widgets"]
+    ui <--> store
+    device --> ui
+  end
+
+  subgraph cloud["☁️ Backend"]
+    api["bloom-health-service<br/>Go · Gin · Vercel"]
+    db[("MongoDB Atlas")]
+    worker["bloom-health-task-worker<br/>Go · GCP VM"]
+  end
+
+  smtp{{"Email · one-time codes"}}
+  google{{"Google Sign-In"}}
+  groq{{"Groq · AI model"}}
+
+  store <-->|"HTTPS /v1 · push & pull"| api
+  ui -->|"Bloomy chat"| api
+  api --> smtp
+  api --> google
+  api <--> db
+  worker <-->|"claim & settle chat turns"| db
+  worker -->|"Bloomy replies"| groq
+  worker -.->|"daily account clean-up"| api
+```
+
+### 🔄 How data flows
+
+**Offline-first sync.** Everything you log is saved to SQLite on your phone first and added to a sync queue. When you're online, the app *pushes* queued changes. Each change has its own id, so a retry never applies it twice. Then it *pulls* everything new since its last cursor. If the same record was changed in two places, a version check settles it the same way every time.
+
+**Sign-in.** Enter your phone or email and you get a one-time code by email, or you can sign in with Google. The service returns a short-lived access token and a refresh session. There are no passwords anywhere.
+
+**Bloomy chat.** The app never calls the AI model itself. The service queues the turn in MongoDB, and the worker picks it up:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as 📱 App
+  participant S as bloom-health-service
+  participant M as MongoDB
+  participant W as bloom-health-task-worker
+  participant G as Groq
+
+  A->>S: Send message
+  S->>M: Save your message, queue a pending reply
+  S-->>A: Accepted (reply pending)
+  W->>M: Claim the pending reply
+  W->>G: Ask the model
+  G-->>W: Answer
+  W->>M: Save the reply (or retry later / mark failed)
+  loop until the reply is ready
+    A->>S: Check the conversation
+    S->>M: Read messages
+    S-->>A: Bloomy's reply 🌸
+  end
+```
+
+Each chat allows one reply in flight at a time. Every user has a daily message cap, and retries back off when the model is busy.
+
+### 🔐 Privacy built in
+
+- **Period data stays with you.** The server filters it out for viewers, both in sync and in stats.
+- **No health data goes to the AI.** Bloomy only sees your chat.
+- **Chat text is never logged**, by the service or the worker.
+- **No secrets on your phone.** Model and database keys live only on the servers.
+
 ---
 
 <p align="center">
